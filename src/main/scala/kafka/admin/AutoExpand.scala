@@ -96,14 +96,13 @@ object AutoExpandCommand extends Logging {
       }
       if (inProgress){
         println("Timeout reassignment partitions:\n\n%s".format(zkUtils.getPartitionReassignmentZkData(partitionsToBeReassigned)))
-        System.exit(1)
       } else{
         println("Reassignment compleated!!!")
       }
     } else{
       error("Invalid reassignment data. Emty partitions found!!!")
-      System.exit(1)
     }
+    println("Rebalancing DONE!!!")
 
   }
   private def checkIfReassignmentSucceeded(zkUtils: ZkUtils, partitionsToBeReassigned: Map[TopicAndPartition, Seq[Int]])

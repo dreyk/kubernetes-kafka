@@ -10,5 +10,7 @@ if [[ -n "$BROKER_ID_PROTOTYPE" ]]; then
 	export KAFKA_BROKER_ID=$ID
 fi
 
+trap "echo 'Rebalancing'; /usr/bin/kafka-autoextend-partitions.sh down; exit" SIGHUP SIGINT SIGTERM
+/usr/bin/kafka-autoextend-partitions.sh up &
 /usr/bin/start-kafka.sh
 

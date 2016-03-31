@@ -15,10 +15,12 @@ spec:
     spec:
       containers:
       - name: kafka
-        image: cloudtrackinc/kubernetes-kafka
+        image: cloudtrackinc/kubernetes-kafka:latest
         ports:
         - containerPort: 9092
         env:
+          - name: KAFKA_RESERVED_BROKER_MAX_ID
+            value: "999999999"
           - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
             value: "false"
           - name: KAFKA_PORT
@@ -37,10 +39,3 @@ spec:
             value: kafka-zoo-svc:2181
           - name: KAFKA_CREATE_TOPICS
             value: demo-topic:16:1
-        lifecycle:
-          postStart:
-            exec:
-              command: ["kafka-autoextend-partitions.sh","up"]
-          preStop:
-            exec:
-              command: ["kafka-autoextend-partitions.sh","down"]
