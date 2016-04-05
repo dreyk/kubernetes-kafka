@@ -10,7 +10,7 @@ import collection._
 
 
 
-object AutoExpandCommand extends Logging {
+object AutoExpandCommand{
   def main(args: Array[String]): Unit = {
     val opts = new AutoExpandCommandOptions(args)
     val me = opts.options.valueOf(opts.selfBroker)
@@ -100,7 +100,7 @@ object AutoExpandCommand extends Logging {
         println("Reassignment compleated!!!")
       }
     } else{
-      error("Invalid reassignment data. Emty partitions found!!!")
+      println("Invalid reassignment data. Emty partitions found!!!")
     }
     println("Rebalancing DONE!!!")
 

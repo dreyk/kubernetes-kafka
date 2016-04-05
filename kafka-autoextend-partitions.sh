@@ -3,6 +3,7 @@
 
 BROKER="$KAFKA_ADVERTISED_HOST_NAME:$KAFKA_ADVERTISED_PORT"
 
+echo "Custom action $1 for $BROKER"
 if [[ -z "$START_TIMEOUT" ]]; then
     START_TIMEOUT=600
 fi
@@ -22,4 +23,4 @@ if [[ "$1" = "up" ]];then
 	done
 fi
 
-exec $KAFKA_HOME/bin/kafka-run-class.sh kafka.admin.AutoExpandCommand --zookeeper=$KAFKA_ZOOKEEPER_CONNECT --broker=$BROKER --updown=$1
+$KAFKA_HOME/bin/kafka-run-class.sh kafka.admin.AutoExpandCommand --zookeeper=$KAFKA_ZOOKEEPER_CONNECT --broker=$BROKER --updown=$1
