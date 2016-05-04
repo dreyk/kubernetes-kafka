@@ -1,43 +1,132 @@
 package kafka.admin
 
+import java.util.concurrent.CountDownLatch
+
 import joptsimple.OptionParser
 import kafka.cluster.BrokerEndPoint
 import kafka.common.TopicAndPartition
 import kafka.utils._
 import org.apache.kafka.common.protocol.SecurityProtocol
 import org.apache.kafka.common.security.JaasUtils
+
 import collection._
+import _root_.scala.collection.JavaConversions._
+import java.util.{Collections, List => JList}
+
+import org.I0Itec.zkclient.{IZkChildListener, IZkDataListener, IZkStateListener}
+import org.apache.zookeeper.CreateMode
 
 
+object AutoExpandCommand {
+  val KAFKA_POD_MASTER = "/kafka-master-pod"
+  val KAFKA_PODS_UID = "/kafka-pods-uid"
+  val KAFKA_PODS_UID_GENERATOR = "/kafka-pods-uid-genreator"
+  val GENERATE_MODE = "generate"
+  class SearchableSeq[T](a: Seq[T])(implicit ordering: Ordering[T]) {
+    val list: JList[T] = a.toList
 
-object AutoExpandCommand{
+    def binarySearch(key: T): Int = Collections.binarySearch(list, key, ordering)
+  }
+
+  implicit def seqToSearchable[T](a: Seq[T])(implicit ordering: Ordering[T]) =
+    new SearchableSeq(a)(ordering)
+
   def main(args: Array[String]): Unit = {
     val opts = new AutoExpandCommandOptions(args)
-    val me = opts.options.valueOf(opts.selfBroker)
-    val (addr,port) = me.split(':') match {
-      case Array(e1,e2) =>
-        (e1,Integer.parseInt(e2))
-      case _ =>
-        ("127.0.0.1",9092)
+    opts.options.valueOf(opts.mode) match{
+      case GENERATE_MODE=>
+        println(generate_broker(opts))
+      case _=>
+        monitor(opts)
     }
+  }
+  def monitor(opts: AutoExpandCommandOptions): Unit = {
+    val uid = opts.options.valueOf(opts.selfBroker)
     val zkConnect = opts.options.valueOf(opts.zkConnectOpt)
     val zkUtils = ZkUtils(zkConnect, 30000, 30000, JaasUtils.isZkSecurityEnabled)
-    val newBrokers = opts.options.valueOf(opts.up_down) match{
-      case "up"=>
-        zkUtils.getAllBrokersInCluster()
-      case "down"=>
-        zkUtils.getAllBrokersInCluster().filter{
-          b=>
-            b.getBrokerEndPoint(SecurityProtocol.PLAINTEXT) match{
-              case BrokerEndPoint(_,a,p) if a==addr && p==port=>
-                println("Exclude broker: %d".format(b.id))
-                false
-              case BrokerEndPoint(id,a,p)=>
-                println("Broker: %d(%s:%d)".format(id,a,p))
-                true
-            }
-        }
+    zkUtils.makeSurePersistentPathExists(KAFKA_POD_MASTER)
+    val mNode = zkUtils.zkClient.createEphemeralSequential(KAFKA_POD_MASTER+"/pod-", uid)
+    val index = sequnce(mNode)
+    case class Broker(index: Int, id: String) extends Ordered[Broker] {
+      import scala.math.Ordered.orderingToOrdered
+
+      def compare(that: Broker): Int = this.index.compareTo(that.index)
     }
+    while(true) {
+      val children = zkUtils.zkClient.getChildren(KAFKA_POD_MASTER).map {
+        s =>
+          Broker(sequnce(s), s)
+      }.sorted
+      val aIndex = children.binarySearch(Broker(index, mNode))
+      if (aIndex == 0) {
+        leader_loop(mNode.replace(KAFKA_POD_MASTER + "/", ""), zkUtils)
+      } else {
+        val w = new CountDownLatch(1)
+        new Thread(new Runnable {
+          override def run(): Unit = {
+            val prev = children.get(aIndex - 1)
+            println("wath " + "/kafka-master-pod/" + prev.id)
+            zkUtils.zkClient.subscribeDataChanges("/kafka-master-pod/" + prev.id, new IZkDataListener {
+              override def handleDataChange(dataPath: String, data: scala.Any): Unit = {
+
+              }
+              override def handleDataDeleted(dataPath: String): Unit = {
+                zkUtils.zkClient.unsubscribeAll()
+                w.countDown()
+              }
+            })
+          }
+        }).start()
+        w.await()
+      }
+    }
+  }
+
+  def generate_broker(opts: AutoExpandCommandOptions) = {
+    val uid = opts.options.valueOf(opts.selfBroker)
+    val zkConnect = opts.options.valueOf(opts.zkConnectOpt)
+    val zkUtils = ZkUtils(zkConnect, 30000, 30000, JaasUtils.isZkSecurityEnabled)
+    zkUtils.makeSurePersistentPathExists(KAFKA_PODS_UID)
+    zkUtils.zkClient.readData[String](KAFKA_PODS_UID+"/"+uid,true) match {
+      case id:String if id!=null=>
+        Integer.parseInt(id)
+      case _=>
+        zkUtils.makeSurePersistentPathExists(KAFKA_PODS_UID_GENERATOR)
+        val id = sequnce(zkUtils.zkClient.createEphemeralSequential(KAFKA_PODS_UID_GENERATOR+"/pod-",uid))+1
+        zkUtils.zkClient.create(KAFKA_PODS_UID+"/"+uid,id.toString,CreateMode.PERSISTENT)
+        id
+    }
+  }
+  def sequnce(node: String) = {
+    val index = node.lastIndexOf("-")
+    if (index > 0) {
+      Integer.parseInt(node.substring(index + 1))
+    } else {
+      -1
+    }
+  }
+
+  def leader_loop(node: String,zkUtils: ZkUtils) = {
+    //expand(zkUtils)
+    println("Start leader: "+node)
+    val w = new CountDownLatch(1)
+    new Thread(new Runnable {
+      override def run(): Unit = {
+        zkUtils.zkClient.subscribeChildChanges(KAFKA_POD_MASTER, new IZkChildListener {
+          override def handleChildChange(parentPath: String, currentChilds: JList[String]): Unit = {
+            println("Check expand")
+            if (!currentChilds.contains(node)){
+              w.countDown()
+            }
+          }
+        })
+      }
+    }).start()
+    w.await()
+    System.exit(0)
+  }
+  def expand(zkUtils: ZkUtils): Unit = {
+    val newBrokers = zkUtils.getAllBrokersInCluster()
     val newBrokersIds = newBrokers.map{
       b =>
         b.id
@@ -146,11 +235,11 @@ class AutoExpandCommandOptions(args: Array[String]) {
     .ofType(classOf[String])
 
   val selfBroker = parser.accepts("broker", "Self broker addr")
-  .withOptionalArg().defaultsTo("").ofType(classOf[String])
+    .withOptionalArg().defaultsTo("").ofType(classOf[String])
 
-  val up_down = parser.accepts("updown", "Up or Down hook")
+  val mode = parser.accepts("mode", "Generate broker")
     .withOptionalArg()
-    .defaultsTo("up")
+    .defaultsTo("generate")
     .ofType(classOf[String])
 
   val options = parser.parse(args: _*)
