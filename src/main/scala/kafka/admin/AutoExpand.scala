@@ -107,7 +107,7 @@ object AutoExpandCommand {
   }
 
   def leader_loop(node: String,zkUtils: ZkUtils) = {
-    //expand(zkUtils)
+    expand(zkUtils)
     println("Start leader: "+node)
     val w = new CountDownLatch(1)
     new Thread(new Runnable {
@@ -118,6 +118,7 @@ object AutoExpandCommand {
             if (!currentChilds.contains(node)){
               w.countDown()
             }
+            expand(zkUtils)
           }
         })
       }
