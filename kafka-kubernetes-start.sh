@@ -10,7 +10,7 @@ if [[ -z "$KAFKA_BROKER_ID" ]]; then
 		export KUBERNETS_UID=$HOSTNAME
 	fi
     echo "Generate Kafka Broker ID: for $KUBERNETS_UID"
-	ID=`$KAFKA_HOME/bin/kafka-run-class.sh kafka.admin.AutoExpandCommand --zookeeper=127.0.0.1:2181 -broker=$KUBERNETS_UID -mode=generate`
+	ID=`$KAFKA_HOME/bin/kafka-run-class.sh kafka.admin.AutoExpandCommand --zookeeper=$KAFKA_ZOOKEEPER_CONNECT -broker=$KUBERNETS_UID -mode=generate`
 	echo "Use broker ID: $ID"
 	export KAFKA_BROKER_ID=$ID
 fi
