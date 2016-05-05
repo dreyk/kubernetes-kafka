@@ -1,6 +1,6 @@
 package kafka.admin
 
-import java.util.concurrent.CountDownLatch
+import java.util.concurrent.{CountDownLatch, LinkedBlockingDeque, TimeUnit}
 
 import joptsimple.OptionParser
 import kafka.cluster.BrokerEndPoint
@@ -107,25 +107,41 @@ object AutoExpandCommand {
   }
 
   def leader_loop(node: String,zkUtils: ZkUtils) = {
-    expand(zkUtils)
     println("Start leader: "+node)
+    val extender = new Extender(zkUtils)
+    new Thread(extender).start()
     val w = new CountDownLatch(1)
     new Thread(new Runnable {
       override def run(): Unit = {
         zkUtils.zkClient.subscribeChildChanges(KAFKA_POD_MASTER, new IZkChildListener {
           override def handleChildChange(parentPath: String, currentChilds: JList[String]): Unit = {
-            println("Check expand")
             if (!currentChilds.contains(node)){
               w.countDown()
+            } else {
+              extender.queue.add(currentChilds)
             }
-            expand(zkUtils)
           }
         })
       }
     }).start()
+    extender.queue.add(zkUtils.zkClient.getChildren(KAFKA_POD_MASTER))
     w.await()
     System.exit(0)
   }
+
+  class Extender(zkUtils: ZkUtils) extends Runnable {
+    val queue = new LinkedBlockingDeque[JList[String]]()
+    override def run(): Unit = {
+      while(true){
+        if(queue.poll(1,TimeUnit.MINUTES)!=null){
+          while(queue.poll(10,TimeUnit.SECONDS)!=null){}
+          println("Check expand")
+          expand(zkUtils)
+        }
+      }
+    }
+  }
+
   def expand(zkUtils: ZkUtils): Unit = {
     val newBrokers = zkUtils.getAllBrokersInCluster()
     val newBrokersIds = newBrokers.map{
